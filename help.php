@@ -1,5 +1,9 @@
 <?php
 session_start();
+
+// Check if a user is logged in
+$is_logged_in = isset($_SESSION['user_id']);
+$user_role = $is_logged_in ? $_SESSION['role'] : '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -16,8 +20,25 @@ session_start();
             <img src="images/logo.png" alt="LoyaltyHub Logo">
         </div>
         <nav class="nav">
-            <a href="index.php">Home</a>
-            <a href="login.php" class="btn">Login</a>
+            <?php if ($is_logged_in): ?>
+                <?php if ($user_role === 'admin'): ?>
+                    <a href="admin.php">Home</a>
+                    <a href="functionalities.php">Functionalities</a>
+                    <a href="help.php">Help</a>
+                    <a href="admin.php" class="btn">Dashboard</a>
+                <?php else: ?>
+                    <a href="user.php">Home</a>
+                    <a href="functionalities.php">Functionalities</a>
+                    <a href="help.php">Help</a>
+                    <a href="user.php" class="btn">My Profile</a>
+                <?php endif; ?>
+                <a href="logout.php" class="btn">Logout</a>
+            <?php else: ?>
+                <a href="index.php">Home</a>
+                <a href="functionalities.php">Functionalities</a>
+                <a href="help.php">Help</a>
+                <a href="login.php" class="btn">Login</a>
+            <?php endif; ?>
         </nav>
     </header>
 
@@ -27,23 +48,26 @@ session_start();
         
         <div class="faq">
             <h3>How do I log in?</h3>
-            <p>Go to the login page and enter your assigned username and password. If you are a student, use the default username `uoc` and password `uoc`.</p>
+            <p>Go to the login page and enter your username and password. If you are a new user please register.</p>
         </div>
 
         <div class="faq">
             <h3>How do I see my loyalty points?</h3>
-            <p>After logging in, you will be taken to your dashboard. From there, you can select your company from the dropdown menu to view your points.</p>
+            <p>After logging in, you will be taken to your dashboard. From there, you can see your selected companies and your points.</p>
         </div>
         
         <div class="faq">
             <h3>What if I forgot my password?</h3>
-            <p>For this system, please contact an administrator to reset your password.</p>
+            <p>Please contact an administrator to reset your password.</p>
         </div>
 
         <div class="faq">
             <h3>How can I contact support?</h3>
-            <p>For any issues, please reach out to our administration team. (Replace with a specific contact method if needed.)</p>
+            <p>For any issues, please reach out to our administration team.</p>
         </div>
     </main>
+    <footer class="site-footer">
+        <p>&copy; 2025 Loyalty Rewards Program. All rights reserved.</p>
+    </footer>
 </body>
 </html>

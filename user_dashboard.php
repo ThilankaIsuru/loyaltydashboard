@@ -1,33 +1,125 @@
 <?php
 session_start();
 
-// Check if the user is NOT logged in or is NOT an ordinary user
-if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'ordinary') {
+// Database connection
+$host = 'localhost';
+$dbname = 'loyalty_rewards';
+$username = 'root';
+$password = '';
+
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    die("Database connection failed: " . $e->getMessage());
+}
+
+// Redirect if not a logged-in user
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
     header("Location: login.php");
     exit();
 }
 
-// Include the database connection file to fetch user data
-include 'includes/db_connect.php';
-
-// Fetch the current user's details from the database
 $user_id = $_SESSION['user_id'];
-$sql = "SELECT username, company_id FROM users WHERE user_id = ?";
-$stmt = $conn->prepare($sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$result = $stmt->get_result();
-$user = $result->fetch_assoc();
+$success = '';
+$error = '';
 
-$username = $user['username'];
-$user_company_id = $user['company_id'];
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['update_profile'])) {
+        // Handle profile update
+        $first_name = trim($_POST['first_name'] ?? '');
+        $last_name = trim($_POST['last_name'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $new_password = $_POST['new_password'] ?? '';
+        $current_password = $_POST['current_password'] ?? '';
 
-// Fetch all companies to populate the dropdown
-$sql_companies = "SELECT company_id, company_name FROM companies";
-$result_companies = $conn->query($sql_companies);
+        // Validate phone number
+        if (!empty($phone) && !preg_match('/^[0-9]{10}$/', $phone)) {
+            $error = "Phone number must be exactly 10 digits.";
+        }
 
-// Close the database connection
-$conn->close();
+        if (empty($error)) {
+            $update_fields = [];
+            $update_params = [];
+
+            // Check if a password is being updated
+            if (!empty($new_password)) {
+                // Check current password before allowing an update
+                $stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
+                $stmt->execute([$_SESSION['user_id']]);
+                $current_hash = $stmt->fetchColumn();
+
+                if (password_verify($current_password, $current_hash)) {
+                    $update_fields[] = 'password = ?';
+                    $update_params[] = password_hash($new_password, PASSWORD_DEFAULT);
+                } else {
+                    $error = "Incorrect current password.";
+                }
+            }
+
+            // Add other fields if valid
+            if (empty($error)) {
+                $update_fields[] = 'first_name = ?';
+                $update_params[] = $first_name;
+                $update_fields[] = 'last_name = ?';
+                $update_params[] = $last_name;
+                $update_fields[] = 'phone = ?';
+                $update_params[] = $phone;
+
+                $update_params[] = $_SESSION['user_id'];
+
+                $update_query = "UPDATE users SET " . implode(', ', $update_fields) . " WHERE id = ?";
+                $stmt = $pdo->prepare($update_query);
+                $stmt->execute($update_params);
+
+                $success = "Your information has been updated successfully.";
+            }
+        }
+    } elseif (isset($_POST['update_merchants'])) {
+        // Handle merchant update
+        try {
+            // Begin a transaction
+            $pdo->beginTransaction();
+
+            // 1. Delete all existing merchant associations for the user
+            $stmt_delete = $pdo->prepare("DELETE FROM user_merchants WHERE user_id = ?");
+            $stmt_delete->execute([$user_id]);
+
+            // 2. Insert the newly selected merchants
+            $merchants_to_add = $_POST['merchants'] ?? [];
+            $stmt_insert = $pdo->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
+            
+            foreach ($merchants_to_add as $merchant_id) {
+                $stmt_insert->execute([$user_id, $merchant_id]);
+            }
+
+            // Commit the transaction
+            $pdo->commit();
+            $success = "Your merchant list has been updated successfully.";
+
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            $error = "Failed to update merchants: " . $e->getMessage();
+        }
+    }
+}
+
+// Get user data from the database
+$stmt = $pdo->prepare("SELECT first_name, last_name, phone, email FROM users WHERE id = ?");
+$stmt->execute([$user_id]);
+$user = $stmt->fetch();
+
+// Fetch all available merchants
+$stmt_all_merchants = $pdo->query("SELECT id, name FROM merchants ORDER BY name ASC");
+$all_merchants = $stmt_all_merchants->fetchAll();
+
+// Fetch merchants the user has already joined
+$stmt_user_merchants = $pdo->prepare("SELECT merchant_id FROM user_merchants WHERE user_id = ?");
+$stmt_user_merchants->execute([$user_id]);
+$user_merchants = $stmt_user_merchants->fetchAll(PDO::FETCH_COLUMN, 0); // Fetch merchant IDs into a flat array
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -36,43 +128,167 @@ $conn->close();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoyaltyHub - User Dashboard</title>
     <link rel="stylesheet" href="styles/main.css">
+    <style>
+        .profile-container, .manage-container {
+            max-width: 600px;
+            margin: 40px auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .profile-container h1, .manage-container h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .profile-form label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .profile-form input[type="text"],
+        .profile-form input[type="email"],
+        .profile-form input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .profile-form input[readonly] {
+            background-color: #f0f0f0;
+            cursor: not-allowed;
+        }
+        .profile-form button, .manage-container button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            background-color: #3f90ff;
+            color: white;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .profile-form button:hover, .manage-container button:hover {
+            background-color: #2e7af3;
+        }
+        .message {
+            text-align: center;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+        .merchant-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .merchant-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background-color: #f7f7f7;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .merchant-item img {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+        }
+        .merchant-item label {
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-
     <header class="header">
         <div class="logo-container">
             <img src="images/logo.png" alt="LoyaltyHub Logo">
         </div>
         <nav class="nav">
-            <a href="user_dashboard.php">Dashboard</a>
+            <a href="index.php">Home</a>
+            <a href="functionalities.php">Functionalities</a>
+            <a href="help.php">Help</a>
+            <a href="user_dashboard.php">My Profile</a>
             <a href="logout.php" class="btn">Logout</a>
         </nav>
     </header>
 
     <main class="container">
-        <h1>Welcome, <?php echo htmlspecialchars($username); ?>!</h1>
-        <p>This is your personal dashboard. Here you can view your loyalty points and select your company.</p>
+        <div class="profile-container">
+            <h1>My Profile</h1>
+            <?php if (!empty($success)): ?>
+                <div class="message success"><?php echo $success; ?></div>
+            <?php endif; ?>
+            <?php if (!empty($error)): ?>
+                <div class="message error"><?php echo $error; ?></div>
+            <?php endif; ?>
+            <form action="user_dashboard.php" method="POST" class="profile-form">
+                <label for="first_name">First Name</label>
+                <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($user['first_name']); ?>" required>
 
-        <form action="update_company.php" method="POST" class="form-group">
-            <label for="company">Select Your Company:</label>
-            <select name="company_id" id="company">
-                <?php while ($row = $result_companies->fetch_assoc()): ?>
-                    <option value="<?php echo htmlspecialchars($row['company_id']); ?>"
-                        <?php if ($row['company_id'] == $user_company_id) echo 'selected'; ?>>
-                        <?php echo htmlspecialchars($row['company_name']); ?>
-                    </option>
-                <?php endwhile; ?>
-            </select>
-            <button type="submit" class="btn">Update Company</button>
-        </form>
+                <label for="last_name">Last Name</label>
+                <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($user['last_name']); ?>" required>
 
-        <div class="loyalty-points">
-            <h2>Your Loyalty Points:</h2>
-            <?php
-            // This is a placeholder. We will fetch and display the points in a later step.
-            echo "<p>Please select a company to view your points.</p>";
-            ?>
+                <label for="phone">Phone Number</label>
+                <input type="text" id="phone" name="phone" value="<?php echo htmlspecialchars($user['phone']); ?>" required>
+
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" value="<?php echo htmlspecialchars($user['email']); ?>" readonly>
+
+                <hr style="margin: 20px 0;">
+
+                <p>Change Password (optional)</p>
+                <label for="current_password">Current Password</label>
+                <input type="password" id="current_password" name="current_password">
+
+                <label for="new_password">New Password</label>
+                <input type="password" id="new_password" name="new_password">
+
+                <button type="submit" name="update_profile">Update Profile</button>
+            </form>
+        </div>
+
+        <div class="manage-container">
+            <h1>Manage My Merchants</h1>
+            <p>Select the merchants you want to join. Unchecking a merchant will remove it from your list.</p>
+            <form action="user_dashboard.php" method="POST">
+                <div class="merchant-list">
+                    <?php foreach ($all_merchants as $merchant): ?>
+                        <div class="merchant-item">
+                            <input type="checkbox" 
+                                   id="merchant_<?= htmlspecialchars($merchant['id']) ?>" 
+                                   name="merchants[]" 
+                                   value="<?= htmlspecialchars($merchant['id']) ?>"
+                                   <?= in_array($merchant['id'], $user_merchants) ? 'checked' : '' ?>>
+                            <img src="images/<?= htmlspecialchars($merchant['id']) ?>.png" 
+                                 alt="<?= htmlspecialchars($merchant['name']) ?>">
+                            <label for="merchant_<?= htmlspecialchars($merchant['id']) ?>">
+                                <?= htmlspecialchars($merchant['name']) ?>
+                            </label>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <button type="submit" name="update_merchants" class="btn-update">Update Merchants</button>
+            </form>
         </div>
     </main>
+
+    <footer class="site-footer">
+        <p>&copy; 2025 Loyalty Rewards Program. All rights reserved.</p>
+    </footer>
 </body>
 </html>

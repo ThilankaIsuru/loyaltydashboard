@@ -1,36 +1,62 @@
-CREATE DATABASE loyaltyhub_db;
+CREATE DATABASE loyalty_rewards;
 
-CREATE TABLE companies (
-    company_id INT AUTO_INCREMENT PRIMARY KEY,
-    company_name VARCHAR(255) NOT NULL
-);
+USE loyalty_rewards;
 
 CREATE TABLE users (
-    user_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL UNIQUE,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    phone VARCHAR(10) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    user_type ENUM('admin', 'ordinary') NOT NULL,
-    company_id INT,
-    FOREIGN KEY (company_id) REFERENCES companies(company_id)
+    role ENUM('user', 'admin') DEFAULT 'user',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert a sample company first
-INSERT INTO companies (company_name) VALUES ('Default Company');
+CREATE TABLE merchants (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT
+);
 
--- Insert the default 'uoc' user
-INSERT INTO users (username, password, user_type, company_id) VALUES ('uoc', 'uoc', 'ordinary', 1);
+CREATE TABLE rewards (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    merchant_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    points_required INT NOT NULL,
+    FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
+);
 
--- Insert a sample admin user for testing
-INSERT INTO users (username, password, user_type) VALUES ('admin', 'adminpass', 'admin');
 
-CREATE TABLE loyalty_points (
-    points_id INT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    merchant_id INT,
+    action_type ENUM('purchase', 'redeem', 'earned') NOT NULL,
+    points_earned INT DEFAULT 0,
+    points_used INT DEFAULT 0,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE user_merchants (
+    id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    company_id INT NOT NULL,
-    points_balance INT NOT NULL DEFAULT 0,
-    FOREIGN KEY (user_id) REFERENCES users(user_id),
-    FOREIGN KEY (company_id) REFERENCES companies(company_id)
+    merchant_id INT NOT NULL,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE,
+    UNIQUE(user_id, merchant_id)
 );
 
--- Assuming user_id 1 is 'uoc' and company_id 1 is 'Default Company'
-INSERT INTO loyalty_points (user_id, company_id, points_balance) VALUES (1, 1, 1500);
+
+INSERT INTO merchants (name, description) VALUES 
+('Cargills', 'Supermarket with loyalty rewards'),
+('Keellssuper', 'The most rewarding and largest supermarket in Sri Lanka.'),
+('Spar', 'Activate your New Spar Rewards card and start getting more!'),
+('Arpico', 'Unlock Exclusive Rewards and Benefits.'),
+('Lanka Super', 'Your one-stop shop for daily essentials.');
