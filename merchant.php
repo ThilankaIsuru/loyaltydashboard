@@ -101,7 +101,7 @@ $rewards = $rewards_stmt->fetchAll();
                 <p style="text-align: center; font-size: 2.5em; font-weight: bold; color: #3f90ff;">
                     <?= $current_points ?>
                 </p>
-                <p style="text-align: center;">You can redeem your points for rewards below.</p>
+                <p style="text-align: center;">You can get below Rewards from your points at the merchant</p>
             </div>
         </div>
         
@@ -118,10 +118,10 @@ $rewards = $rewards_stmt->fetchAll();
                             <p><?= htmlspecialchars($r['description']) ?></p>
                             <p><strong><?= $r['points_required'] ?> pts</strong></p>
                             <?php if ($current_points >= $r['points_required']): ?>
-                                <button class="btn">Redeem Now</button>
-                            <?php else: ?>
-                                <button class="btn" disabled>Need <?= $r['points_required'] - $current_points ?> More</button>
-                            <?php endif; ?>
+    <p class="reward-available">✅ Reward available</p>
+<?php else: ?>
+    <p class="need-more-points">Need <?= $r['points_required'] - $current_points ?> more points</p>
+<?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -182,6 +182,18 @@ $rewards = $rewards_stmt->fetchAll();
             background-color: #ccc;
             cursor: not-allowed;
         }
+
+        .reward-available {
+         color: #27ae60;
+         font-weight: bold;
+        margin-top: 10px;
+        }
+
+    .need-more-points {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-top: 10px;
+}
     </style>
 </body>
 </html>
