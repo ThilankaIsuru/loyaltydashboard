@@ -30,7 +30,7 @@ $user_role = $is_logged_in ? $_SESSION['role'] : '';
                     <a href="user.php">Home</a>
                     <a href="functionalities.php">Functionalities</a>
                     <a href="help.php">Help</a>
-                    <a href="user.php" class="btn">My Profile</a>
+                    <a href="user_dashboard.php" class="btn">My Profile</a>
                 <?php endif; ?>
                 <a href="logout.php" class="btn">Logout</a>
             <?php else: ?>

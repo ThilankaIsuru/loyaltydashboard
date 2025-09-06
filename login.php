@@ -105,13 +105,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    $stmt = $pdo->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = ?");
-    $stmt->execute([$email]);
+    // Special case for 'uoc' user
+    if ($email === 'uoc') {
+        $stmt = $pdo->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = 'uoc@loyalty.com'");
+        $stmt->execute();
+    } else {
+        $stmt = $pdo->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = ?");
+        $stmt->execute([$email]);
+    }
+
     $user = $stmt->fetch();
 
     if ($user && password_verify($password, $user['password'])) {
         $_SESSION['user_id']    = (int)$user['id'];
-        $_SESSION['role']       = trim($user['role']); // Trim the role to prevent whitespace issues
+        $_SESSION['role']       = trim($user['role']);
         $_SESSION['full_name'] = $user['first_name'] . ' ' . $user['last_name'];
 
         if ($_SESSION['role'] === 'admin') {
@@ -125,6 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         $defaultTab = 'login';
     }
 }
+
 ?>
 
 <!DOCTYPE html>
@@ -180,7 +188,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         <form id="loginForm" class="form" method="POST">
             <input type="hidden" name="login" value="1" />
             <label for="login_email">Email:</label>
-            <input type="email" id="login_email" name="email" required />
+            <input type="text" id="login_email" name="email" required />
 
             <label for="login_password">Password:</label>
             <input type="password" id="login_password" name="password" required />
