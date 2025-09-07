@@ -1,8 +1,8 @@
 <?php
 $servername = "localhost";
-$username = "root"; // Use your actual MySQL username
-$password = ""; // Use your actual MySQL password
-$dbname = "loyalty_rewards"; // The name of your database
+$username = "root";
+$password = "";
+$dbname = "loyalty_rewards";
 
 // Create connection
 $conn = new mysqli($servername, $username, $password, $dbname);
