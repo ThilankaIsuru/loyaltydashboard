@@ -1,20 +1,8 @@
 <?php
 session_start();
 
-/* ---------- DB ---------- */
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+/* ---------- DB Connection ---------- */
+require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
 
 /* ---------- Messages & State ---------- */
 $success = '';
@@ -22,7 +10,7 @@ $error = '';
 $errors = [];
 $defaultTab = 'login'; // page opens on Login by default
 
-// If we redirected after registration, show success and stay on Login tab
+// If redirected after registration
 if (isset($_GET['registered']) && $_GET['registered'] === '1') {
     $success = "Registration successful! You can now log in.";
     $defaultTab = 'login';
@@ -38,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     $confirm_password = $_POST['confirm_password'] ?? '';
     $selected_companies = $_POST['companies'] ?? [];
 
-    // Validate
+    // Validation
     if ($first_name === '') $errors[] = "First name is required.";
     if ($last_name === '')  $errors[] = "Last name is required.";
     if (!preg_match('/^\d{10}$/', $phone)) $errors[] = "Phone number must be exactly 10 digits.";
@@ -48,50 +36,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
     if ($password !== $confirm_password) $errors[] = "Passwords do not match.";
 
     // Duplicate check
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE email = ? OR phone = ?");
-    $stmt->execute([$email, $phone]);
-    if ($stmt->fetchColumn() > 0) {
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM users WHERE email = ? OR phone = ?");
+    $stmt->bind_param("ss", $email, $phone);
+    $stmt->execute();
+    $stmt->bind_result($count);
+    $stmt->fetch();
+    $stmt->close();
+
+    if ($count > 0) {
         $errors[] = "Email or phone number already registered.";
     }
 
     if (empty($errors)) {
         try {
-            $pdo->beginTransaction();
+            $conn->begin_transaction();
 
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
 
             // Insert user
-            $stmt = $pdo->prepare("
+            $stmt = $conn->prepare("
                 INSERT INTO users (first_name, last_name, phone, email, password, role)
                 VALUES (?, ?, ?, ?, ?, 'user')
             ");
-            $stmt->execute([$first_name, $last_name, $phone, $email, $hashed_password]);
-
-            $user_id = (int)$pdo->lastInsertId();
+            $stmt->bind_param("sssss", $first_name, $last_name, $phone, $email, $hashed_password);
+            $stmt->execute();
+            $user_id = $stmt->insert_id;
+            $stmt->close();
 
             // Insert selected merchants
             if (!empty($selected_companies)) {
-                $checkMerchant = $pdo->prepare("SELECT COUNT(*) FROM merchants WHERE id = ?");
-                $link = $pdo->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
+                $checkMerchant = $conn->prepare("SELECT COUNT(*) FROM merchants WHERE id = ?");
+                $link = $conn->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
 
                 foreach ($selected_companies as $cid) {
                     $cid = (int)$cid;
                     if ($cid <= 0) continue;
 
-                    $checkMerchant->execute([$cid]);
-                    if ($checkMerchant->fetchColumn() > 0) {
-                        $link->execute([$user_id, $cid]);
+                    $checkMerchant->bind_param("i", $cid);
+                    $checkMerchant->execute();
+                    $checkMerchant->bind_result($mCount);
+                    $checkMerchant->fetch();
+                    $checkMerchant->free_result();
+
+                    if ($mCount > 0) {
+                        $link->bind_param("ii", $user_id, $cid);
+                        $link->execute();
                     }
                 }
+                $checkMerchant->close();
+                $link->close();
             }
 
-            $pdo->commit();
+            $conn->commit();
 
-            // Redirect with success flag
+            // Redirect with success
             header("Location: " . basename(__FILE__) . "?registered=1");
             exit;
         } catch (Exception $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            $conn->rollback();
             $error = "Registration failed: " . $e->getMessage();
             $defaultTab = 'register';
         }
@@ -105,20 +107,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    // Special case for 'uoc' user
     if ($email === 'uoc') {
-        $stmt = $pdo->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = 'uoc@loyalty.com'");
-        $stmt->execute();
+        $stmt = $conn->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = 'uoc@loyalty.com'");
     } else {
-        $stmt = $pdo->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = ?");
-        $stmt->execute([$email]);
+        $stmt = $conn->prepare("SELECT id, first_name, last_name, password, role FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
     }
-
-    $user = $stmt->fetch();
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user = $result->fetch_assoc();
+    $stmt->close();
 
     if ($user && password_verify($password, $user['password'])) {
-        $_SESSION['user_id']    = (int)$user['id'];
-        $_SESSION['role']       = trim($user['role']);
+        $_SESSION['user_id']   = (int)$user['id'];
+        $_SESSION['role']      = trim($user['role']);
         $_SESSION['full_name'] = $user['first_name'] . ' ' . $user['last_name'];
 
         if ($_SESSION['role'] === 'admin') {
@@ -132,7 +134,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         $defaultTab = 'login';
     }
 }
-
 ?>
 
 <!DOCTYPE html>

@@ -8,19 +8,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 }
 
 /* ---------- DB Connection ---------- */
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
 
 /* ---------- Messages & State ---------- */
 $success = '';
@@ -36,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $password = $_POST['password'] ?? '';
     $confirm_password = $_POST['confirm_password'] ?? '';
     $role = trim($_POST['role'] ?? 'user');
-    $selected_companies = $_POST['companies'] ?? []; // New: Get selected companies
+    $selected_companies = $_POST['companies'] ?? [];
 
     // Validate inputs
     if ($first_name === '')
@@ -52,53 +40,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     if (!preg_match('/[0-9]/', $password))
         $errors[] = "Password must contain at least one number.";
     if ($password !== $confirm_password)
-        $errors[] = "Passwords do not match."; // New: Validate confirm password
+        $errors[] = "Passwords do not match.";
     if ($role !== 'user' && $role !== 'admin')
         $errors[] = "Invalid user role.";
 
     // Duplicate check for email or phone
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE email = ? OR phone = ?");
-    $stmt->execute([$email, $phone]);
-    if ($stmt->fetchColumn() > 0) {
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM users WHERE email = ? OR phone = ?");
+    $stmt->bind_param("ss", $email, $phone);
+    $stmt->execute();
+    $stmt->bind_result($count);
+    $stmt->fetch();
+    $stmt->close();
+
+    if ($count > 0) {
         $errors[] = "Email or phone number already registered.";
     }
 
     if (empty($errors)) {
         try {
-            // New: Start a database transaction
-            $pdo->beginTransaction();
+            // Start transaction
+            $conn->begin_transaction();
 
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("
+
+            $stmt = $conn->prepare("
                 INSERT INTO users (first_name, last_name, phone, email, password, role)
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
-            $stmt->execute([$first_name, $last_name, $phone, $email, $hashed_password, $role]);
+            $stmt->bind_param("ssssss", $first_name, $last_name, $phone, $email, $hashed_password, $role);
+            $stmt->execute();
+            $user_id = $stmt->insert_id;
+            $stmt->close();
 
-            $user_id = $pdo->lastInsertId();
-
-            // New: Insert selected merchants for the user
+            // Insert selected merchants
             if (!empty($selected_companies)) {
-                $linkStmt = $pdo->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
+                $linkStmt = $conn->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
                 foreach ($selected_companies as $cid) {
-                    $linkStmt->execute([$user_id, (int) $cid]);
+                    $cid = (int) $cid;
+                    $linkStmt->bind_param("ii", $user_id, $cid);
+                    $linkStmt->execute();
                 }
+                $linkStmt->close();
             }
 
-            // Commit the transaction
-            $pdo->commit();
-
+            $conn->commit();
             $success = "User added successfully!";
         } catch (Exception $e) {
-            // Rollback the transaction on failure
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            $conn->rollback();
             $error = "Failed to add user: " . $e->getMessage();
         }
     }
 }
 ?>
+
 
 
 <!DOCTYPE html>

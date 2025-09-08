@@ -1,20 +1,8 @@
 <?php
 session_start();
 
-// Database connection
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+/* ---------- DB Connection ---------- */
+require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
 
 // Redirect if not a logged-in user
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
@@ -24,48 +12,62 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
 
 $user_id = $_SESSION['user_id'];
 
-// Get user data for welcome message
-$stmt_user = $pdo->prepare("SELECT first_name FROM users WHERE id = ?");
-$stmt_user->execute([$user_id]);
-$user = $stmt_user->fetch();
+/* ---------- Get user data for welcome message ---------- */
+$stmt_user = $conn->prepare("SELECT first_name FROM users WHERE id = ?");
+$stmt_user->bind_param("i", $user_id);
+$stmt_user->execute();
+$result_user = $stmt_user->get_result();
+$user = $result_user->fetch_assoc();
+$stmt_user->close();
 
-// Get merchant ID from URL
+/* ---------- Get merchant ID from URL ---------- */
 $merchant_id = $_GET['merchant_id'] ?? null;
-
 if (!$merchant_id) {
     die("Merchant not specified.");
 }
 
-// Get merchant name and logo (assuming logo is based on ID)
-$stmt_merchant = $pdo->prepare("SELECT name FROM merchants WHERE id = ?");
-$stmt_merchant->execute([$merchant_id]);
-$merchant = $stmt_merchant->fetch();
+/* ---------- Get merchant name ---------- */
+$stmt_merchant = $conn->prepare("SELECT name FROM merchants WHERE id = ?");
+$stmt_merchant->bind_param("i", $merchant_id);
+$stmt_merchant->execute();
+$result_merchant = $stmt_merchant->get_result();
+$merchant = $result_merchant->fetch_assoc();
+$stmt_merchant->close();
 
 if (!$merchant) {
     die("Merchant not found.");
 }
 
-// Get current loyalty points for the user at this merchant
-$points_stmt = $pdo->prepare("
+/* ---------- Get current loyalty points ---------- */
+$points_stmt = $conn->prepare("
     SELECT IFNULL(SUM(points_earned), 0) - IFNULL(SUM(points_used), 0) AS total_points
     FROM transactions
     WHERE user_id = ? AND merchant_id = ?
 ");
-$points_stmt->execute([$user_id, $merchant_id]);
-$result = $points_stmt->fetch();
-$current_points = (int)$result['total_points'];
+$points_stmt->bind_param("ii", $user_id, $merchant_id);
+$points_stmt->execute();
+$result_points = $points_stmt->get_result()->fetch_assoc();
+$current_points = (int)$result_points['total_points'];
+$points_stmt->close();
 
-// Get all rewards for this merchant
-$rewards_stmt = $pdo->prepare("
+/* ---------- Get all rewards for this merchant ---------- */
+$rewards_stmt = $conn->prepare("
     SELECT id, name, description, points_required 
     FROM rewards 
     WHERE merchant_id = ?
     ORDER BY points_required ASC
 ");
-$rewards_stmt->execute([$merchant_id]);
-$rewards = $rewards_stmt->fetchAll();
+$rewards_stmt->bind_param("i", $merchant_id);
+$rewards_stmt->execute();
+$result_rewards = $rewards_stmt->get_result();
 
+$rewards = [];
+while ($row = $result_rewards->fetch_assoc()) {
+    $rewards[] = $row;
+}
+$rewards_stmt->close();
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>

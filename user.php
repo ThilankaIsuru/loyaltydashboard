@@ -9,31 +9,29 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
 }
 
 // Database connection
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+require_once 'includes/db_connect.php'; // provides $conn (MySQLi)
 
 // Get user's selected merchants
-$stmt = $pdo->prepare("
+$stmt = $conn->prepare("
     SELECT m.id, m.name, m.description
     FROM user_merchants um
     JOIN merchants m ON um.merchant_id = m.id
     WHERE um.user_id = ?
 ");
-$stmt->execute([$_SESSION['user_id']]);
-$selected_merchants = $stmt->fetchAll();
+$stmt->bind_param("i", $_SESSION['user_id']);
+$stmt->execute();
+$result = $stmt->get_result();
+
+$selected_merchants = [];
+while ($row = $result->fetch_assoc()) {
+    $selected_merchants[] = $row;
+}
+$stmt->close();
 
 $is_logged_in = true;
 $user_role = 'user';
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">

@@ -13,38 +13,34 @@ $dbname = 'loyalty_rewards';
 $username = 'root';
 $password = '';
 
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
+$conn = new mysqli($host, $username, $password, $dbname);
+if ($conn->connect_error) {
+    die("Database connection failed: " . $conn->connect_error);
 }
 
-/* ---------- Fetch Report Data ---------- */
 $reports = [];
 $error = '';
 
+/* ---------- Fetch Report Data ---------- */
 try {
     // Total Users
-    $stmt = $pdo->query("SELECT COUNT(*) AS total_users FROM users");
-    $reports['total_users'] = $stmt->fetchColumn();
+    $result = $conn->query("SELECT COUNT(*) AS total_users FROM users");
+    $reports['total_users'] = $result->fetch_assoc()['total_users'];
 
     // New Users in last 30 days
-    $stmt = $pdo->query("SELECT COUNT(*) AS new_users FROM users WHERE created_at >= NOW() - INTERVAL 30 DAY");
-    $reports['new_users'] = $stmt->fetchColumn();
+    $result = $conn->query("SELECT COUNT(*) AS new_users FROM users WHERE created_at >= NOW() - INTERVAL 30 DAY");
+    $reports['new_users'] = $result->fetch_assoc()['new_users'];
 
     // Total Merchants
-    $stmt = $pdo->query("SELECT COUNT(*) AS total_merchants FROM merchants");
-    $reports['total_merchants'] = $stmt->fetchColumn();
+    $result = $conn->query("SELECT COUNT(*) AS total_merchants FROM merchants");
+    $reports['total_merchants'] = $result->fetch_assoc()['total_merchants'];
 
     // Total Transactions
-    $stmt = $pdo->query("SELECT COUNT(*) AS total_transactions FROM transactions");
-    $reports['total_transactions'] = $stmt->fetchColumn();
+    $result = $conn->query("SELECT COUNT(*) AS total_transactions FROM transactions");
+    $reports['total_transactions'] = $result->fetch_assoc()['total_transactions'];
 
     // Recent Transactions (Last 10)
-    $stmt = $pdo->query("
+    $sql = "
         SELECT 
             t.action_type, 
             t.description, 
@@ -57,14 +53,19 @@ try {
         LEFT JOIN users u ON t.user_id = u.id
         ORDER BY t.created_at DESC
         LIMIT 10
-    ");
-    $reports['recent_transactions'] = $stmt->fetchAll();
+    ";
+    $result = $conn->query($sql);
+    $reports['recent_transactions'] = [];
+    while ($row = $result->fetch_assoc()) {
+        $reports['recent_transactions'][] = $row;
+    }
 
 } catch (Exception $e) {
     $error = "Could not retrieve report data: " . $e->getMessage();
 }
 
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -176,7 +177,7 @@ try {
                                 <td><?= htmlspecialchars($transaction['description']) ?></td>
                                 <td>
                                     <?php
-                                        if ($transaction['action_type'] === 'earned') {
+                                        if ($transaction['action_type'] === 'purchase') {
                                             echo '+' . htmlspecialchars($transaction['points_earned']);
                                         } else {
                                             echo '-' . htmlspecialchars($transaction['points_used']);

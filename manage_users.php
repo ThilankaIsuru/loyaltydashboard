@@ -8,19 +8,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 }
 
 /* ---------- DB Connection ---------- */
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
 
 /* ---------- Messages & State ---------- */
 $success = '';
@@ -31,9 +19,11 @@ $merchants = [];
 
 /* ---------- Fetch All Merchants (for checkboxes) ---------- */
 try {
-    $stmt = $pdo->query("SELECT id, name FROM merchants ORDER BY name");
-    $merchants = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-} catch (PDOException $e) {
+    $stmt = $conn->query("SELECT id, name FROM merchants ORDER BY name");
+    while ($row = $stmt->fetch_assoc()) {
+        $merchants[$row['id']] = $row['name'];
+    }
+} catch (Exception $e) {
     $error = "Failed to load merchants: " . $e->getMessage();
 }
 
@@ -43,15 +33,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['delete_user_id'])) {
         $user_id = (int)$_POST['delete_user_id'];
         try {
-            $pdo->beginTransaction();
-            $stmt = $pdo->prepare("DELETE FROM user_merchants WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
-            $stmt->execute([$user_id]);
-            $pdo->commit();
+            $conn->begin_transaction();
+            $stmt = $conn->prepare("DELETE FROM user_merchants WHERE user_id = ?");
+            $stmt->bind_param("i", $user_id);
+            $stmt->execute();
+            $stmt->close();
+
+            $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+            $stmt->bind_param("i", $user_id);
+            $stmt->execute();
+            $stmt->close();
+
+            $conn->commit();
             $success = "User deleted successfully!";
         } catch (Exception $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($conn->errno) $conn->rollback();
             $error = "Failed to delete user: " . $e->getMessage();
         }
     }
@@ -83,43 +79,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($role !== 'user' && $role !== 'admin') $errors[] = "Invalid user role.";
 
         // Duplicate check on email/phone, excluding the current user
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE (email = ? OR phone = ?) AND id != ?");
-        $stmt->execute([$email, $phone, $user_id]);
-        if ($stmt->fetchColumn() > 0) {
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM users WHERE (email = ? OR phone = ?) AND id != ?");
+        $stmt->bind_param("ssi", $email, $phone, $user_id);
+        $stmt->execute();
+        $stmt->bind_result($count);
+        $stmt->fetch();
+        $stmt->close();
+        if ($count > 0) {
             $errors[] = "Email or phone number already registered to another user.";
         }
 
         if (empty($errors)) {
             try {
-                $pdo->beginTransaction();
+                $conn->begin_transaction();
 
                 $sql = "UPDATE users SET first_name = ?, last_name = ?, phone = ?, email = ?, role = ?";
                 $params = [$first_name, $last_name, $phone, $email, $role];
+                $types = "sssss";
 
                 if (!empty($password)) {
                     $hashed_password = password_hash($password, PASSWORD_DEFAULT);
                     $sql .= ", password = ?";
                     $params[] = $hashed_password;
+                    $types .= "s";
                 }
                 $sql .= " WHERE id = ?";
                 $params[] = $user_id;
+                $types .= "i";
 
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param($types, ...$params);
+                $stmt->execute();
+                $stmt->close();
 
                 // Update loyalty programs
-                $stmt = $pdo->prepare("DELETE FROM user_merchants WHERE user_id = ?");
-                $stmt->execute([$user_id]);
+                $stmt = $conn->prepare("DELETE FROM user_merchants WHERE user_id = ?");
+                $stmt->bind_param("i", $user_id);
+                $stmt->execute();
+                $stmt->close();
+
                 if (!empty($selected_companies)) {
-                    $linkStmt = $pdo->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
+                    $linkStmt = $conn->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
                     foreach ($selected_companies as $cid) {
-                        $linkStmt->execute([$user_id, (int)$cid]);
+                        $cid = (int)$cid;
+                        $linkStmt->bind_param("ii", $user_id, $cid);
+                        $linkStmt->execute();
                     }
+                    $linkStmt->close();
                 }
-                $pdo->commit();
+
+                $conn->commit();
                 $success = "User updated successfully!";
             } catch (Exception $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
+                if ($conn->errno) $conn->rollback();
                 $error = "Failed to update user: " . $e->getMessage();
             }
         }
@@ -128,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 /* ---------- Fetch All Users & Enrolled Programs ---------- */
 try {
-    $stmt = $pdo->query("
+    $sql = "
         SELECT
             u.id, u.first_name, u.last_name, u.phone, u.email, u.role,
             GROUP_CONCAT(m.name ORDER BY m.name SEPARATOR ', ') AS enrolled_programs,
@@ -143,12 +155,17 @@ try {
             u.id
         ORDER BY
             u.id DESC
-    ");
-    $users = $stmt->fetchAll();
-} catch (PDOException $e) {
+    ";
+    $stmt = $conn->query($sql);
+    while ($row = $stmt->fetch_assoc()) {
+        $users[] = $row;
+    }
+    $stmt->close();
+} catch (Exception $e) {
     $error = "Failed to fetch users: " . $e->getMessage();
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">

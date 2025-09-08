@@ -1,25 +1,14 @@
 <?php
 session_start();
 
-// Database connection
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
-
-// Redirect if not a logged-in user
+// Redirect to login if not authenticated as a regular user
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
     header("Location: login.php");
     exit();
 }
+
+// Database connection
+require_once 'includes/db_connect.php'; // provides $conn (MySQLi)
 
 $user_id = $_SESSION['user_id'];
 $success = '';
@@ -27,16 +16,17 @@ $error = '';
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    // Profile update
     if (isset($_POST['update_profile'])) {
-        // Handle profile update
         $first_name = trim($_POST['first_name'] ?? '');
-        $last_name = trim($_POST['last_name'] ?? '');
-        $phone = trim($_POST['phone'] ?? '');
+        $last_name  = trim($_POST['last_name'] ?? '');
+        $phone      = trim($_POST['phone'] ?? '');
         $new_password = $_POST['new_password'] ?? '';
         $current_password = $_POST['current_password'] ?? '';
 
-        // Validate phone number
-        if (!empty($phone) && !preg_match('/^[0-9]{10}$/', $phone)) {
+        // Validate phone
+        if (!empty($phone) && !preg_match('/^\d{10}$/', $phone)) {
             $error = "Phone number must be exactly 10 digits.";
         }
 
@@ -44,83 +34,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $update_fields = [];
             $update_params = [];
 
-            // Check if a password is being updated
+            // Check for password update
             if (!empty($new_password)) {
-                // Check current password before allowing an update
-                $stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
-                $stmt->execute([$_SESSION['user_id']]);
-                $current_hash = $stmt->fetchColumn();
+                $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");
+                $stmt->bind_param("i", $user_id);
+                $stmt->execute();
+                $stmt->bind_result($current_hash);
+                $stmt->fetch();
+                $stmt->close();
 
                 if (password_verify($current_password, $current_hash)) {
-                    $update_fields[] = 'password = ?';
+                    $update_fields[] = "password = ?";
                     $update_params[] = password_hash($new_password, PASSWORD_DEFAULT);
                 } else {
                     $error = "Incorrect current password.";
                 }
             }
 
-            // Add other fields if valid
             if (empty($error)) {
-                $update_fields[] = 'first_name = ?';
+                $update_fields[] = "first_name = ?";
+                $update_fields[] = "last_name = ?";
+                $update_fields[] = "phone = ?";
                 $update_params[] = $first_name;
-                $update_fields[] = 'last_name = ?';
                 $update_params[] = $last_name;
-                $update_fields[] = 'phone = ?';
                 $update_params[] = $phone;
 
-                $update_params[] = $_SESSION['user_id'];
+                $update_params[] = $user_id;
 
-                $update_query = "UPDATE users SET " . implode(', ', $update_fields) . " WHERE id = ?";
-                $stmt = $pdo->prepare($update_query);
-                $stmt->execute($update_params);
+                $sql = "UPDATE users SET " . implode(', ', $update_fields) . " WHERE id = ?";
+                $stmt = $conn->prepare($sql);
+
+                // Dynamically bind parameters
+                $types = str_repeat('s', count($update_fields)); // 's' for string
+                if (!empty($new_password)) $types = 's' . $types; // first param is password
+                $types .= 'i'; // for user_id at the end
+
+                $stmt->bind_param(str_repeat('s', count($update_params) - 1) . 'i', ...$update_params);
+                $stmt->execute();
+                $stmt->close();
 
                 $success = "Your information has been updated successfully.";
             }
         }
-    } elseif (isset($_POST['update_merchants'])) {
-        // Handle merchant update
+    }
+
+    // Merchant update
+    if (isset($_POST['update_merchants'])) {
+        $merchants_to_add = $_POST['merchants'] ?? [];
+
+        $conn->begin_transaction();
+
         try {
-            // Begin a transaction
-            $pdo->beginTransaction();
+            // Delete old associations
+            $stmt_delete = $conn->prepare("DELETE FROM user_merchants WHERE user_id = ?");
+            $stmt_delete->bind_param("i", $user_id);
+            $stmt_delete->execute();
+            $stmt_delete->close();
 
-            // 1. Delete all existing merchant associations for the user
-            $stmt_delete = $pdo->prepare("DELETE FROM user_merchants WHERE user_id = ?");
-            $stmt_delete->execute([$user_id]);
-
-            // 2. Insert the newly selected merchants
-            $merchants_to_add = $_POST['merchants'] ?? [];
-            $stmt_insert = $pdo->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
-            
+            // Insert new associations
+            $stmt_insert = $conn->prepare("INSERT INTO user_merchants (user_id, merchant_id) VALUES (?, ?)");
             foreach ($merchants_to_add as $merchant_id) {
-                $stmt_insert->execute([$user_id, $merchant_id]);
+                $merchant_id = (int)$merchant_id;
+                $stmt_insert->bind_param("ii", $user_id, $merchant_id);
+                $stmt_insert->execute();
             }
+            $stmt_insert->close();
 
-            // Commit the transaction
-            $pdo->commit();
+            $conn->commit();
             $success = "Your merchant list has been updated successfully.";
-
         } catch (Exception $e) {
-            $pdo->rollBack();
+            $conn->rollback();
             $error = "Failed to update merchants: " . $e->getMessage();
         }
     }
 }
 
-// Get user data from the database
-$stmt = $pdo->prepare("SELECT first_name, last_name, phone, email FROM users WHERE id = ?");
-$stmt->execute([$user_id]);
-$user = $stmt->fetch();
+// Fetch user data
+$stmt = $conn->prepare("SELECT first_name, last_name, phone, email FROM users WHERE id = ?");
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$user = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-// Fetch all available merchants
-$stmt_all_merchants = $pdo->query("SELECT id, name FROM merchants ORDER BY name ASC");
-$all_merchants = $stmt_all_merchants->fetchAll();
+// Fetch all merchants
+$all_merchants = [];
+$result = $conn->query("SELECT id, name FROM merchants ORDER BY name ASC");
+while ($row = $result->fetch_assoc()) {
+    $all_merchants[] = $row;
+}
 
-// Fetch merchants the user has already joined
-$stmt_user_merchants = $pdo->prepare("SELECT merchant_id FROM user_merchants WHERE user_id = ?");
-$stmt_user_merchants->execute([$user_id]);
-$user_merchants = $stmt_user_merchants->fetchAll(PDO::FETCH_COLUMN, 0); // Fetch merchant IDs into a flat array
+// Fetch user's enrolled merchants
+$user_merchants = [];
+$stmt = $conn->prepare("SELECT merchant_id FROM user_merchants WHERE user_id = ?");
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
+while ($row = $result->fetch_assoc()) {
+    $user_merchants[] = $row['merchant_id'];
+}
+$stmt->close();
 
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
