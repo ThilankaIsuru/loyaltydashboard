@@ -7,21 +7,13 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-/* ---------- DB ---------- */
-$host = 'localhost';
-$dbname = 'loyalty_rewards';
-$username = 'root';
-$password = '';
-
-$conn = new mysqli($host, $username, $password, $dbname);
-if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
-}
+// Database connection
+require_once 'includes/db_connect.php';
 
 $reports = [];
 $error = '';
 
-/* ---------- Fetch Report Data ---------- */
+// Get Report Data
 try {
     // Total Users
     $result = $conn->query("SELECT COUNT(*) AS total_users FROM users");

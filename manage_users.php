@@ -7,17 +7,17 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-/* ---------- DB Connection ---------- */
-require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
+// DB Connection
+require_once 'includes/db_connect.php'; 
 
-/* ---------- Messages & State ---------- */
+// Messages 
 $success = '';
 $error = '';
 $errors = [];
 $users = [];
 $merchants = [];
 
-/* ---------- Fetch All Merchants (for checkboxes) ---------- */
+// Get All Merchants (for checkboxes)
 try {
     $stmt = $conn->query("SELECT id, name FROM merchants ORDER BY name");
     while ($row = $stmt->fetch_assoc()) {
@@ -27,7 +27,7 @@ try {
     $error = "Failed to load merchants: " . $e->getMessage();
 }
 
-/* ---------- Edit & Delete Logic ---------- */
+// Edit & Delete
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Delete User
     if (isset($_POST['delete_user_id'])) {
@@ -138,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/* ---------- Fetch All Users & Enrolled Programs ---------- */
+// Fetch All Users and Enrolled Programs
 try {
     $sql = "
         SELECT

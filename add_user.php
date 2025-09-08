@@ -7,15 +7,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-/* ---------- DB Connection ---------- */
-require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
+// DB Connection
+require_once 'includes/db_connect.php';
 
-/* ---------- Messages & State ---------- */
+// Messages
 $success = '';
 $error = '';
 $errors = [];
 
-/* ---------- Add User Logic ---------- */
+// get User details
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $first_name = trim($_POST['first_name'] ?? '');
     $last_name = trim($_POST['last_name'] ?? '');
@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
 
     if (empty($errors)) {
         try {
-            // Start transaction
+            // add user details to database
             $conn->begin_transaction();
 
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);

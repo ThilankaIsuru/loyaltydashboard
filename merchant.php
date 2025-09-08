@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-/* ---------- DB Connection ---------- */
-require_once 'includes/db_connect.php'; // gives $conn (MySQLi)
+// DB Connection
+require_once 'includes/db_connect.php'; 
 
 // Redirect if not a logged-in user
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
@@ -12,7 +12,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'user') {
 
 $user_id = $_SESSION['user_id'];
 
-/* ---------- Get user data for welcome message ---------- */
+// Get user data for welcome message
 $stmt_user = $conn->prepare("SELECT first_name FROM users WHERE id = ?");
 $stmt_user->bind_param("i", $user_id);
 $stmt_user->execute();
